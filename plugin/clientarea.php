@@ -699,6 +699,20 @@ function dnsmanager_clientarea($vars) {
         $templateVars['recordTotal'] = count($dnsRecords);
     }
 
+    // 递归将对象转为数组，防止 Smarty 编译为数组访问时报 stdClass 错误
+    $normalizeDeep = function($value) use (&$normalizeDeep) {
+        if (is_object($value)) {
+            $value = json_decode(json_encode($value), true);
+        }
+        if (is_array($value)) {
+            $normalized = [];
+            foreach ($value as $k => $v) { $normalized[$k] = $normalizeDeep($v); }
+            return $normalized;
+        }
+        return $value;
+    };
+    $templateVars = $normalizeDeep($templateVars);
+
     return [
         'pagetitle' => 'DNS 管理',
         'breadcrumb' => ['index.php?m=dnsmanager' => 'DNS Manager'],
