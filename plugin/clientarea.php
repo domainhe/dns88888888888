@@ -676,13 +676,16 @@ function dnsmanager_clientarea($vars) {
         }
         $templateVars['dnsRecords'] = $dnsRecords;
 
-        // 最近操作日志（前 10 条）
+        // 最近操作日志（前 10 条），转换为纯数组供 Smarty 使用
         try {
             $logsQ = Capsule::table('mod_dnsmanager_logs')
                 ->where('userid', $currentUserId)
                 ->orderBy('id', 'desc')
                 ->limit(10);
-            $templateVars['recentLogs'] = $logsQ->get();
+            $logs = $logsQ->get();
+            $logsArr = [];
+            foreach ($logs as $lg) { $logsArr[] = (array) $lg; }
+            $templateVars['recentLogs'] = $logsArr;
         } catch (\Exception $e) {
             $templateVars['recentLogs'] = [];
         }
