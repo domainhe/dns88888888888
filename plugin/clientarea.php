@@ -656,6 +656,14 @@ function dnsmanager_clientarea($vars) {
         if (isset($recordsData['result']) && is_array($recordsData['result'])) {
             $dnsRecords = $recordsData['result'];
         }
+        // 强制将记录及其嵌套 data 转为数组，避免 Smarty 报 stdClass 作为数组使用错误
+        $normalized = [];
+        foreach ($dnsRecords as $rec) {
+            // 深度转换为数组
+            $arr = json_decode(json_encode($rec), true);
+            $normalized[] = $arr;
+        }
+        $dnsRecords = $normalized;
         if (isset($recordsData['result_info'])) {
             $info = $recordsData['result_info'];
             if (isset($info['page']) && isset($info['total_pages'])) {
