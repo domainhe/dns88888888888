@@ -306,6 +306,51 @@ function dnsmanager_clientarea($vars) {
         }
 
         if ($action === 'deletedns' && $selectedDomain && isset($_POST['id']) && $error === '') {
+        // 从 CSV 导入记录
+        if ($action === 'importcsv' && $selectedDomain && $error === '') {
+            if (!isset($_FILES['csvfile']) || !is_uploaded_file($_FILES['csvfile']['tmp_name'])) {
+                $error = '未选择 CSV 文件';
+            } else {
+                $zoneId = $selectedDomain->zone_id;
+                $api = $buildApi($zoneId);
+                $fh = fopen($_FILES['csvfile']['tmp_name'], 'r');
+                $rowNum = 0; $ok = 0; $fail = 0;
+                if ($fh) {
+                    while (($cols = fgetcsv($fh)) !== false) {
+                        $rowNum++;
+                        if ($rowNum === 1) {
+                            // 跳过表头（如果检测到非类型字段）
+                            if (isset($cols[0]) && !in_array(strtoupper(trim($cols[0])), ['A','AAAA','CNAME','MX','TXT','SRV','NS','CAA','PTR'], true)) {
+                                continue;
+                            }
+                        }
+                        $type = isset($cols[0]) ? strtoupper(trim($cols[0])) : '';
+                        $name = isset($cols[1]) ? trim($cols[1]) : '';
+                        $content = isset($cols[2]) ? trim($cols[2]) : '';
+                        $ttl = isset($cols[3]) ? (int)$cols[3] : 1;
+                        $proxied = isset($cols[4]) ? ((int)$cols[4] === 1) : false;
+                        $priority = isset($cols[5]) && $cols[5] !== '' ? (int)$cols[5] : null;
+                        $data = null;
+                        if ($type === 'SRV' || $type === 'CAA') {
+                            $data = isset($cols[6]) && $cols[6] !== '' ? json_decode($cols[6], true) : null;
+                            if ($data === null) { $data = []; }
+                        }
+                        if ($type === '' || $name === '') { $fail++; continue; }
+                        $resp = $api->addRecord($zoneId, $type, $name, $content, $ttl>0?$ttl:1, $proxied, $priority, $data);
+                        if (isset($resp['success']) && $resp['success']) {
+                            $ok++;
+                            try {
+                                $fqdn = function_exists('dnsmanager_build_fqdn') ? dnsmanager_build_fqdn($selectedDomain->domain, $name) : $name;
+                                dnsmanager_save_desired_record($selectedDomain->id, $selectedDomain->zone_id, $type, $fqdn, $content, $ttl>0?$ttl:1, $proxied, $priority, $data);
+                            } catch (\Exception $e) {}
+                        } else { $fail++; }
+                    }
+                    fclose($fh);
+                }
+                $message = '导入完成：成功 ' . $ok . '，失败 ' . $fail;
+            }
+            $action = 'manage';
+        }
             $zoneId = $selectedDomain->zone_id;
             $api = $buildApi($zoneId);
             $resp = $api->deleteRecord($zoneId, $_POST['id']);
@@ -326,6 +371,43 @@ function dnsmanager_clientarea($vars) {
             }
             $action = 'manage';
         }
+
+        // 批量操作（删除 / TTL / 代理）
+        if ($action === 'bulkrecords' && $selectedDomain && $error === '') {
+            $zoneId = $selectedDomain->zone_id;
+            $api = $buildApi($zoneId);
+            $ids = isset($_POST['ids']) ? (array)$_POST['ids'] : [];
+            $bulk = isset($_POST['bulk_action']) ? $_POST['bulk_action'] : '';
+            $bulkTtl = isset($_POST['bulk_ttl']) ? (int)$_POST['bulk_ttl'] : 1;
+            $ok = 0; $fail = 0;
+            foreach ($ids as $rid) {
+                $rid = trim($rid);
+                if ($rid === '') { continue; }
+                $detail = $api->getRecord($zoneId, $rid);
+                if (!(isset($detail['success']) && $detail['success'] && isset($detail['result']))) { $fail++; continue; }
+                $r = $detail['result'];
+                if ($bulk === 'delete') {
+                    $resp = $api->deleteRecord($zoneId, $rid);
+                    $ok += (isset($resp['success']) && $resp['success']) ? 1 : 0;
+                    $fail += (isset($resp['success']) && $resp['success']) ? 0 : 1;
+                } elseif ($bulk === 'ttl') {
+                    $resp = $api->updateRecord($zoneId, $rid, $r['type'], $r['name'], isset($r['content'])?$r['content']:'', $bulkTtl>0?$bulkTtl:1, isset($r['proxied'])?$r['proxied']:false, isset($r['priority'])?$r['priority']:null, isset($r['data'])?$r['data']:null);
+                    $ok += (isset($resp['success']) && $resp['success']) ? 1 : 0;
+                    $fail += (isset($resp['success']) && $resp['success']) ? 0 : 1;
+                } elseif ($bulk === 'proxy_on' || $bulk === 'proxy_off') {
+                    $enable = $bulk === 'proxy_on';
+                    // 仅对 A/AAAA/CNAME 生效
+                    $t = isset($r['type']) ? strtoupper($r['type']) : '';
+                    if (in_array($t, ['A','AAAA','CNAME'], true)) {
+                        $resp = $api->updateRecord($zoneId, $rid, $t, $r['name'], isset($r['content'])?$r['content']:'', isset($r['ttl'])?$r['ttl']:1, $enable, isset($r['priority'])?$r['priority']:null, isset($r['data'])?$r['data']:null);
+                        $ok += (isset($resp['success']) && $resp['success']) ? 1 : 0;
+                        $fail += (isset($resp['success']) && $resp['success']) ? 0 : 1;
+                    }
+                }
+            }
+            $message = '批量操作完成：成功 ' . $ok . '，失败 ' . $fail;
+            $action = 'manage';
+        }
     }
 
     // Handle GET actions
@@ -344,6 +426,14 @@ function dnsmanager_clientarea($vars) {
             if (in_array($type, ['A','AAAA','CNAME'], true)) {
                 $resp = $api->updateRecord($zoneId, $recId, $type, $r['name'], isset($r['content'])?$r['content']:'', isset($r['ttl'])?$r['ttl']:1, $enable, isset($r['priority'])?$r['priority']:null, isset($r['data'])?$r['data']:null);
                 $ok = isset($resp['success']) && $resp['success'];
+                if ($ok) {
+                    // 更新 desired 记录
+                    try {
+                        $fqdn = function_exists('dnsmanager_build_fqdn') ? dnsmanager_build_fqdn($selectedDomain->domain, $r['name']) : $r['name'];
+                        dnsmanager_save_desired_record($selectedDomain->id, $selectedDomain->zone_id, $type, $fqdn, isset($r['content'])?$r['content']:'', isset($r['ttl'])?$r['ttl']:1, $enable, isset($r['priority'])?$r['priority']:null, isset($r['data'])?$r['data']:null);
+                    } catch (\Exception $e) {}
+                    $logAction('toggle-cdn', $type, $r['name'], $enable ? 'enable=1' : 'enable=0');
+                }
             } else {
                 $msg = '不支持的类型';
             }
@@ -352,6 +442,69 @@ function dnsmanager_clientarea($vars) {
         }
         header('Content-Type: application/json');
         echo json_encode(['success'=>$ok,'message'=>$msg,'enabled'=>$enable?1:0]);
+        exit;
+    }
+
+    // 快速设置 TTL（AJAX）
+    if ($action === 'setttl' && $selectedDomain && isset($_GET['id']) && isset($_GET['ttl'])) {
+        $zoneId = $selectedDomain->zone_id;
+        $api = $buildApi($zoneId);
+        $recId = trim($_GET['id']);
+        $newTtl = (int) $_GET['ttl'];
+        $ok = false; $msg = '';
+        $detail = $api->getRecord($zoneId, $recId);
+        if (isset($detail['success']) && $detail['success'] && isset($detail['result'])) {
+            $r = $detail['result'];
+            $type = isset($r['type']) ? strtoupper($r['type']) : '';
+            $nameVal = isset($r['name']) ? $r['name'] : '';
+            $contentVal = isset($r['content']) ? $r['content'] : '';
+            $ttlVal = $newTtl > 0 ? $newTtl : 1;
+            $proxiedVal = isset($r['proxied']) ? (bool)$r['proxied'] : false;
+            $priorityVal = isset($r['priority']) ? $r['priority'] : null;
+            $dataVal = isset($r['data']) ? $r['data'] : null;
+            $resp = $api->updateRecord($zoneId, $recId, $type, $nameVal, $contentVal, $ttlVal, $proxiedVal, $priorityVal, $dataVal);
+            $ok = isset($resp['success']) && $resp['success'];
+            if ($ok) {
+                $message = 'TTL 已更新';
+                $logAction('edit-record', $type, $nameVal, 'ttl=' . $ttlVal);
+                try {
+                    $fqdn = function_exists('dnsmanager_build_fqdn') ? dnsmanager_build_fqdn($selectedDomain->domain, $nameVal) : $nameVal;
+                    dnsmanager_save_desired_record($selectedDomain->id, $selectedDomain->zone_id, $type, $fqdn, $contentVal, $ttlVal, $proxiedVal, $priorityVal, $dataVal);
+                } catch (\Exception $e) {}
+            } else { $msg = '更新失败'; }
+        } else { $msg = '读取记录失败'; }
+        header('Content-Type: application/json');
+        echo json_encode(['success'=>$ok,'message'=>$msg,'ttl'=>$newTtl>0?$newTtl:1]);
+        exit;
+    }
+
+    // 导出 CSV（当前筛选）
+    if ($action === 'exportcsv' && $selectedDomain) {
+        $zoneId = $selectedDomain->zone_id;
+        $api = $buildApi($zoneId);
+        $params = ['per_page' => 500];
+        if ($rsearch !== '') { $params['name'] = $rsearch; }
+        if (isset($_GET['rtype']) && $_GET['rtype'] !== '') { $params['type'] = strtoupper(trim($_GET['rtype'])); }
+        $recordsData = $api->listRecords($zoneId, $params);
+        $rows = isset($recordsData['result']) && is_array($recordsData['result']) ? $recordsData['result'] : [];
+        $filename = 'dns_records_' . preg_replace('/[^A-Za-z0-9_.-]/','_', $selectedDomain->domain) . '.csv';
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        if ($out) {
+            fputcsv($out, ['type','name','content','ttl','proxied','priority','data']);
+            foreach ($rows as $r) {
+                $type = isset($r['type']) ? $r['type'] : '';
+                $name = isset($r['name']) ? $r['name'] : '';
+                $content = isset($r['content']) ? $r['content'] : '';
+                $ttl = isset($r['ttl']) ? $r['ttl'] : 1;
+                $proxied = isset($r['proxied']) && $r['proxied'] ? 1 : 0;
+                $priority = isset($r['priority']) ? $r['priority'] : '';
+                $data = isset($r['data']) ? json_encode($r['data']) : '';
+                fputcsv($out, [$type,$name,$content,$ttl,$proxied,$priority,$data]);
+            }
+            fclose($out);
+        }
         exit;
     }
 
@@ -406,6 +559,7 @@ function dnsmanager_clientarea($vars) {
         'rtype' => isset($_GET['rtype']) ? strtoupper(trim($_GET['rtype'])) : '',
         'recordsHasNext' => false,
         'locked' => 0,
+        'recentLogs' => [],
     ];
 
     // Domains list
@@ -483,6 +637,13 @@ function dnsmanager_clientarea($vars) {
             if ($etaMin >= 60) { $hours = floor($etaMin/60); $mins = $etaMin % 60; $hint = $hours . ' 小时' . ($mins>0?(' ' . $mins . ' 分钟'):''); }
             else { $hint = $etaMin . ' 分钟'; }
         }
+        // Status badge mapping for UI
+        $nsBadgeClass = 'badge badge-danger';
+        $nsBadgeText = '未修改 NS';
+        if ($nsStatus === 'active') { $nsBadgeClass = 'badge badge-success'; $nsBadgeText = '已生效'; }
+        elseif ($nsStatus === 'pending') { $nsBadgeClass = 'badge badge-warning'; $nsBadgeText = '待生效'; }
+        $templateVars['nsBadgeClass'] = $nsBadgeClass;
+        $templateVars['nsBadgeText'] = $nsBadgeText;
         $templateVars['nsProgress'] = $progress;
         $templateVars['nsEtaText'] = $hint;
         $templateVars['nsCheckedAt'] = $checkedAt ? date('Y-m-d H:i', $checkedAt) : '';
@@ -506,6 +667,17 @@ function dnsmanager_clientarea($vars) {
             $templateVars['recordsHasNext'] = count($dnsRecords) === $rlimit;
         }
         $templateVars['dnsRecords'] = $dnsRecords;
+
+        // 最近操作日志（前 10 条）
+        try {
+            $logsQ = Capsule::table('mod_dnsmanager_logs')
+                ->where('userid', $currentUserId)
+                ->orderBy('id', 'desc')
+                ->limit(10);
+            $templateVars['recentLogs'] = $logsQ->get();
+        } catch (\Exception $e) {
+            $templateVars['recentLogs'] = [];
+        }
 
         // Record type counts for UI filters
         $typeCounts = ['A'=>0,'AAAA'=>0,'CNAME'=>0,'MX'=>0,'TXT'=>0,'SRV'=>0,'NS'=>0];

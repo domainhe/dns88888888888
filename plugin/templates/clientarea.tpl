@@ -27,6 +27,11 @@
     /* Keep badges minimal by using Bootstrap context or light border */
     .badge{display:inline-block;padding:.25em .5em;font-size:85%;font-weight:600;line-height:1;border-radius:.25rem;}
     .badge-light{background-color:#f8f9fa;color:#212529;border:1px solid #dee2e6;}
+    .badge-success{background-color:#28a745;color:#fff}
+    .badge-warning{background-color:#ffc107;color:#212529}
+    .badge-danger{background-color:#dc3545;color:#fff}
+    .badge-secondary{background-color:#e9ecef;color:#212529}
+    .badge-info{background-color:#17a2b8;color:#fff}
 
     /* Table head light */
     .thead-light th{background-color:#f8f9fa;border-color:#dee2e6;}
@@ -86,6 +91,18 @@
     .dm-switch .knob{position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .2s}
     .dm-switch.on{background:#f5a623;border-color:#f5a623}
     .dm-switch.on .knob{left:26px}
+    .dm-switch i.fa-cloud{position:absolute;top:6px;left:18px;color:#ccc}
+    .dm-switch.on i.fa-cloud{color:#fff}
+
+    /* Outline buttons fallback for BS3 */
+    .btn-outline-primary{color:#337ab7;background-color:#fff;border:1px solid #337ab7}
+    .btn-outline-primary:hover{color:#fff;background-color:#337ab7}
+    .btn-outline-danger{color:#d9534f;background-color:#fff;border:1px solid #d9534f}
+    .btn-outline-danger:hover{color:#fff;background-color:#d9534f}
+    .btn-outline-success{color:#5cb85c;background-color:#fff;border:1px solid #5cb85c}
+    .btn-outline-success:hover{color:#fff;background-color:#5cb85c}
+    .btn-outline-secondary{color:#6c757d;background-color:#fff;border:1px solid #6c757d}
+    .btn-outline-secondary:hover{color:#fff;background-color:#6c757d}
     </style>
     {/literal}
 
@@ -267,9 +284,9 @@
                             {if $selectedDomain.ns_status == 'active'}
                                 <span class="badge badge-success">已生效</span>
                             {elseif $selectedDomain.ns_status == 'pending'}
-                                <span id="ns-status-badge" class="badge badge-warning">未生效</span>
+                                <span id="ns-status-badge" class="badge badge-warning">待生效</span>
                             {else}
-                                <span id="ns-status-badge" class="badge badge-secondary">{$selectedDomain.ns_status}</span>
+                                <span id="ns-status-badge" class="badge badge-danger">未修改 NS</span>
                             {/if}
                         </span>
                         <a class="btn btn-sm btn-outline-secondary" href="index.php?m=dnsmanager&action=refreshns&domain_id={$selectedDomain.id}">刷新 NS 状态</a>
@@ -454,10 +471,41 @@
                     <button type="submit" class="btn btn-primary">筛选</button>
                 </form>
                 {if $dnsRecords|@count > 0}
-                    <div class="table-responsive">
-                    <table class="table table-striped table-hover records-table">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div>
+                        <a class="btn btn-light btn-sm" href="index.php?m=dnsmanager&action=exportcsv&domain_id={$selectedDomain.id}&rsearch={$rsearch}&rtype={$rtype}"><i class="fa fa-download"></i> 导出 CSV</a>
+                        <button class="btn btn-light btn-sm" data-toggle="modal" data-target="#importCsvModal"><i class="fa fa-upload"></i> 导入 CSV</button>
+                      </div>
+                      <div class="text-muted"><small>可勾选记录进行批量操作</small></div>
+                    </div>
+                    <form method="post" action="index.php?action=bulkrecords&m=dnsmanager&domain_id={$selectedDomain.id}" id="bulk-form">
+                      <input type="hidden" name="token" value="{$token}">
+                      <div class="form-inline mb-2">
+                        <div class="form-group mr-2">
+                          <select class="form-control" name="bulk_action">
+                            <option value="delete">批量删除</option>
+                            <option value="ttl">批量设置 TTL</option>
+                            <option value="proxy_on">批量开启代理</option>
+                            <option value="proxy_off">批量关闭代理</option>
+                          </select>
+                        </div>
+                        <div class="form-group mr-2">
+                          <select class="form-control" name="bulk_ttl">
+                            <option value="1">自动</option>
+                            <option value="300">300</option>
+                            <option value="600">600</option>
+                            <option value="900">900</option>
+                            <option value="1800">1800</option>
+                            <option value="3600">3600</option>
+                          </select>
+                        </div>
+                        <button type="submit" class="btn btn-danger btn-sm js-loading-btn" data-loading-text="执行中..." {if $locked}disabled title="该域名已锁定，前台只读"{/if}>执行</button>
+                      </div>
+                      <div class="table-responsive">
+                      <table class="table table-striped table-hover records-table">
                         <thead class="thead-light">
                             <tr>
+                                <th style="width:36px"><input type="checkbox" id="select-all"></th>
                                 <th>类型</th>
                                 <th>名称</th>
                                 <th class="content-col">内容/数据</th>
@@ -469,6 +517,7 @@
                         <tbody>
                             {foreach from=$dnsRecords item=record}
                             <tr>
+                                <td><input type="checkbox" name="ids[]" value="{$record.id}"></td>
                                 <td><span class="badge badge-info">{$record.type}</span></td>
                                 <td>{$record.name}</td>
                                 <td>
@@ -479,10 +528,13 @@
                                         {$record.content}
                                     {/if}
                                 </td>
-                                <td>{if $record.ttl == 1}自动{else}{$record.ttl} 秒{/if}</td>
+                                <td>
+                                  <a href="#" class="js-ttl-toggle" data-id="{$record.id}" data-ttl="{$record.ttl}" title="点击切换常用 TTL">{if $record.ttl == 1}自动{else}{$record.ttl} 秒{/if}</a>
+                                </td>
                                 <td>
                                     {if $record.type == 'A' || $record.type == 'AAAA' || $record.type == 'CNAME'}
                                         <button type="button" class="dm-switch js-toggle-cdn {if $record.proxied}on{/if}" data-id="{$record.id}" data-enabled="{if $record.proxied}1{else}0{/if}" title="点击切换 CDN">
+                                          <i class="fa fa-cloud"></i>
                                           <span class="knob"></span>
                                         </button>
                                     {else}
@@ -490,7 +542,6 @@
                                     {/if}
                                 </td>
                                 <td class="text-right">
-                                    
                                     <button class="btn btn-sm btn-outline-success copy-record-btn"
                                         data-type="{$record.type}"
                                         data-name="{$record.name}"
@@ -602,8 +653,9 @@
                             </div>
                             {/foreach}
                         </tbody>
-                    </table>
-                    </div>
+                      </table>
+                      </div>
+                    </form>
                     <div class="d-flex justify-content-between mt-3">
                         <div>
                             <a class="btn btn-default {if $rpage<=1}disabled{/if}" href="index.php?m=dnsmanager&action=manage&domain_id={$selectedDomain.id}&rsearch={$rsearch}&rlimit={$rlimit}&rpage={if $rpage>1}{$rpage-1}{else}1{/if}">上一页</a>
@@ -620,6 +672,47 @@
     </div>
 
 </div>
+
+<!-- 导入 CSV 模态框 -->
+<div class="modal fade" id="importCsvModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">从 CSV 导入 DNS 记录</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="关闭">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <form method="post" action="index.php?action=importcsv&m=dnsmanager&domain_id={$selectedDomain.id}" enctype="multipart/form-data">
+        <input type="hidden" name="token" value="{$token}">
+        <div class="modal-body">
+            <div class="form-group">
+              <label>选择 CSV 文件</label>
+              <input type="file" class="form-control" name="csvfile" accept=".csv" required>
+              <small class="text-muted">格式：type,name,content,ttl,proxied,priority（首行可为表头）</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary js-loading-btn" data-loading-text="导入中...">开始导入</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{if $recentLogs}
+<div class="card shadow-sm mt-3">
+  <div class="card-header"><strong>最近操作</strong></div>
+  <div class="card-body">
+    <ul class="list-unstyled" style="margin:0">
+      {foreach from=$recentLogs item=log}
+      <li class="mb-1"><small class="text-muted">{$log.created_at}</small> - {$log.action} {if $log.record_type}[{$log.record_type}]{/if} {if $log.record_name}{$log.record_name}{/if} {if $log.record_content}&rarr; {$log.record_content}{/if}</li>
+      {/foreach}
+    </ul>
+  </div>
+</div>
+{/if}
 
 <!-- 添加域名模态框 -->
 <div class="modal fade" id="addDomainModal" tabindex="-1" role="dialog" aria-hidden="true">
@@ -1039,6 +1132,27 @@
       if(icon){ icon.style.color = enabled ? '#ccc' : '#f5a623'; }
     });
   }
+
+  // TTL 快捷切换
+  document.addEventListener('click', function(e){
+    if(e.target && e.target.classList.contains('js-ttl-toggle')){
+      e.preventDefault();
+      var a = e.target;
+      var id = a.getAttribute('data-id');
+      var ttl = parseInt(a.getAttribute('data-ttl') || '1', 10);
+      var steps = [1,300,600,900,1800,3600];
+      var idx = steps.indexOf(ttl);
+      ttl = steps[(idx+1) % steps.length];
+      var domainId = '{if $selectedDomain}{$selectedDomain.id}{/if}';
+      if(!id || !domainId){ return; }
+      var url = 'index.php?m=dnsmanager&action=setttl&domain_id=' + domainId + '&id=' + encodeURIComponent(id) + '&ttl=' + ttl;
+      function apply(newTtl){ a.setAttribute('data-ttl', newTtl); a.textContent = newTtl===1? '自动' : (newTtl + ' 秒'); }
+      if (window.jQuery && $.get) { $.get(url).done(function(res){ try{ var r=(typeof res==='string')?JSON.parse(res):res; if(r && r.success){ apply(ttl); } }catch(err){} }); }
+      else {
+        var xhr = new XMLHttpRequest(); xhr.open('GET', url, true); xhr.withCredentials = true; xhr.onreadystatechange = function(){ if(xhr.readyState===4){ try{ var r = JSON.parse(xhr.responseText||'{}'); if(r && r.success){ apply(ttl); } }catch(err){} } }; xhr.send(null);
+      }
+    }
+  });
 
   // 列表 CDN 点击切换（AJAX）
   document.addEventListener('click', function(e){

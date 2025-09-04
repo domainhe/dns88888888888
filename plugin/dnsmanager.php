@@ -17,9 +17,9 @@ function dnsmanager_config() {
             "auth_type" => [
                 "FriendlyName" => "认证方式",
                 "Type" => "dropdown",
-                "Options" => "key=全局 API Key",
-                "Description" => "固定使用邮箱 + Global API Key 认证",
-                "Default" => "key",
+                "Options" => "token=API Token|key=全局 API Key",
+                "Description" => "推荐使用 API Token（更安全，可最小权限）。",
+                "Default" => "token",
             ],
             "api_email" => [
                 "FriendlyName" => "Cloudflare Email",
