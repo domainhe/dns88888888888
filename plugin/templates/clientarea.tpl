@@ -41,9 +41,13 @@
     .modal-dialog-centered .modal-content{margin:auto;}
 
     /* Hero banner simplified */
-    .hero-banner{background:#f8f9fa;border-radius:.5rem;color:#212529;padding:12px 14px;margin-bottom:12px;position:relative;overflow:hidden;}
+    .hero-banner{background:linear-gradient(90deg,#f8f9fa 0%, #eef4ff 50%, #f8f9fa 100%);border-radius:.5rem;color:#212529;padding:14px 16px;margin-bottom:12px;position:relative;overflow:hidden;}
     .hero-banner .title{font-size:16px;font-weight:600;margin:0;}
     .hero-banner .subtitle{opacity:.9;margin:2px 0 0 0;}
+    .metrics{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 0 0}
+    .metric{background:#fff;border:1px solid #e5e5e5;border-radius:.5rem;padding:8px 12px;min-width:120px}
+    .metric .k{font-size:18px;font-weight:700}
+    .metric .l{font-size:12px;color:#6c757d}
 
     /* Chips minimal */
     .chip{display:inline-flex;align-items:center;padding:.15rem .4rem;border-radius:999px;background:#f1f3f5;border:1px solid #dee2e6;color:#333;font-weight:600;}
@@ -276,7 +280,7 @@
                 </div>
             {else}
                 <div class="mb-3">
-                    <h5 class="mb-2">管理域名：<span class="text-primary">{$selectedDomain.domain}</span></h5>
+                    <h5 class="mb-2">管理域名：<span class="text-primary">{$selectedDomain.domain}</span> {if $zonePlan}<span class="badge badge-info" title="Cloudflare 计划">{$zonePlan}</span>{/if}</h5>
                     <div>
                         <span class="mr-3">NS1：<span class="badge badge-light">{$selectedDomain.ns1}</span> <button type="button" class="btn btn-light btn-xs copy-btn" data-copy="{$selectedDomain.ns1}">复制</button></span>
                         <span class="mr-3">NS2：<span class="badge badge-light">{$selectedDomain.ns2}</span> <button type="button" class="btn btn-light btn-xs copy-btn" data-copy="{$selectedDomain.ns2}">复制</button></span>
@@ -290,6 +294,12 @@
                             {/if}
                         </span>
                         <a class="btn btn-sm btn-outline-secondary" href="index.php?m=dnsmanager&action=refreshns&domain_id={$selectedDomain.id}">刷新 NS 状态</a>
+                    </div>
+                    <div class="metrics">
+                      <div class="metric"><div class="k">{$recordTotal|default:0}</div><div class="l">当前记录</div></div>
+                      <div class="metric"><div class="k">{$proxiedOnCount|default:0}</div><div class="l">已代理</div></div>
+                      <div class="metric"><div class="k">{$autoTtlCount|default:0}</div><div class="l">TTL 自动</div></div>
+                      <div class="metric"><div class="k">{$manualTtlCount|default:0}</div><div class="l">TTL 手动</div></div>
                     </div>
                     {if $selectedDomain.ns_status != 'active'}
                     <div class="mt-3">

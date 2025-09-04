@@ -676,6 +676,31 @@ function dnsmanager_clientarea($vars) {
         }
         $templateVars['dnsRecords'] = $dnsRecords;
 
+        // 统计指标用于前端展示
+        $proxiedOnCount = 0; $autoTtlCount = 0; $manualTtlCount = 0; $totalRecords = count($dnsRecords);
+        foreach ($dnsRecords as $rec) {
+            $type = isset($rec['type']) ? strtoupper($rec['type']) : '';
+            $ttl = isset($rec['ttl']) ? (int)$rec['ttl'] : 1;
+            if ($ttl === 1) { $autoTtlCount++; } else { $manualTtlCount++; }
+            if (in_array($type, ['A','AAAA','CNAME'], true)) {
+                $on = isset($rec['proxied']) && (bool)$rec['proxied'];
+                if ($on) { $proxiedOnCount++; }
+            }
+        }
+        $templateVars['recordTotal'] = $totalRecords;
+        $templateVars['proxiedOnCount'] = $proxiedOnCount;
+        $templateVars['autoTtlCount'] = $autoTtlCount;
+        $templateVars['manualTtlCount'] = $manualTtlCount;
+
+        // 读取 Zone 计划信息
+        $templateVars['zonePlan'] = '';
+        try {
+            $zoneDetail = $api->getZoneDetails($selectedDomain->zone_id);
+            if (isset($zoneDetail['success']) && $zoneDetail['success'] && isset($zoneDetail['result']['plan']['name'])) {
+                $templateVars['zonePlan'] = (string) $zoneDetail['result']['plan']['name'];
+            }
+        } catch (\Exception $e) {}
+
         // 最近操作日志（前 10 条），转换为纯数组供 Smarty 使用
         try {
             $logsQ = Capsule::table('mod_dnsmanager_logs')
